@@ -21,8 +21,8 @@ Arch:
   name: CSPConvNeXt
   class_num: 1000
   in_chans: 3
-  depths: [2,2,6,2]
-  dims: [48,92,192,384,768]
+  depths: [3,3,9,3]
+  dims: [96,96,192,384,768]
   kernel_size: 7
   if_group: 1
   stride: [1,2,2,2]

@@ -7,7 +7,7 @@ import paddle
 import paddle.nn.functional as F
 import paddle.nn as nn
 from paddle import ParamAttr
-#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 
 trunc_normal_ = nn.initializer.TruncatedNormal(std=0.02)
@@ -159,7 +159,7 @@ class CSPStage(nn.Layer):
         if stride == 2:
             self.down = nn.Sequential(ConvBNLayer(ch_in, ch_mid , 2, stride=2,  act=act))
         else:
-            self.down = nn.Sequential(ConvBNLayer(ch_in, ch_mid , 3, stride=1, padding=1,  act=act))
+            self.down = Identity()
         self.conv1 = ConvBNLayer(ch_mid, ch_mid // 2, 1, act=act)
         self.conv2 = ConvBNLayer(ch_mid, ch_mid // 2, 1, act=act)
         self.blocks = nn.Sequential(*[
@@ -296,8 +296,8 @@ if __name__=="__main__":
      model  = CSPConvNext(
         class_num=1000,
         in_chans=3,
-        depths=[2,2,6,2],
-        dims=[48,92,192,384,768],
+        depths=[3,3,9,3],
+        dims=[96,96,192,384,768],
         kernel_size=7,
         if_group=1,
         drop_path_rate=0.2,
