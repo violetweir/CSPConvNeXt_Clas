@@ -18,9 +18,8 @@ Global:
 
 # model architecture
 Arch:
-  name: CSPConvNeXt_mini
+  name: CSPConvNeXt_tiny
   class_num: 1000
-
  
 # loss function config for traing/eval process
 Loss:

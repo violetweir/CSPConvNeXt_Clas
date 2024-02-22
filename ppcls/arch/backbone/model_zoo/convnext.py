@@ -28,7 +28,7 @@ from paddle import ParamAttr
 from paddle.nn.initializer import Uniform
 import os
 import math
-# from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 trunc_normal_ = nn.initializer.TruncatedNormal(std=0.02)
 zeros_ = nn.initializer.Constant(value=0.0)
@@ -258,7 +258,7 @@ class ClasHead(nn.Layer):
         x = x.reshape([x.shape[0], -1])
         cls_score = self.fc_cls(x)
         return cls_score
-
+ 
 def _load_pretrained(pretrained, model, model_url, use_ssld=False):
     if pretrained is False:
         pass
