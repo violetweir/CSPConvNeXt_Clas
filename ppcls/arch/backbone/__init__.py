@@ -61,7 +61,8 @@ from ppcls.arch.backbone.model_zoo.tnt import TNT_small
 from ppcls.arch.backbone.model_zoo.hardnet import HarDNet68, HarDNet85, HarDNet39_ds, HarDNet68_ds
 from ppcls.arch.backbone.model_zoo.cspnet import CSPDarkNet53
 from ppcls.arch.backbone.model_zoo.convnext import ConvNext_tiny
-from ppcls.arch.backbone.model_zoo.cspconvnext import CSPConvNeXt, CSPConvNeXt_mini
+from ppcls.arch.backbone.model_zoo.cspconvnext import CSPConvNeXt, CSPConvNeXt_mini, CSPConvNeXt_medium
+from ppcls.arch.backbone.model_zoo.csptest import CSPConvNeXt_mini_2
 from ppcls.arch.backbone.model_zoo.CSPConvNeXt import CSPConvNeXt_tiny
 from ppcls.arch.backbone.model_zoo.cspresnst import CSPResNet_tiny
 from ppcls.arch.backbone.model_zoo.cspconvnext_v2 import CSPConvNext_tiny_v2

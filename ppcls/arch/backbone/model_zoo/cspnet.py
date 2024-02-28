@@ -19,7 +19,7 @@ import paddle.nn as nn
 import paddle.nn.functional as F
 from paddle import ParamAttr
 
-from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 MODEL_URLS = {
     "CSPDarkNet53":
@@ -374,3 +374,9 @@ def CSPDarkNet53(pretrained=False, use_ssld=False, **kwargs):
     _load_pretrained(
         pretrained, model, MODEL_URLS["CSPDarkNet53"], use_ssld=use_ssld)
     return model
+
+
+if __name__== '__main__':
+     model  =CSPDarkNet53()
+     # Total Flops: 1189500624     Total Params: 8688640
+     GFlops = paddle.flops(model,(1,3,224,224),print_detail=False)

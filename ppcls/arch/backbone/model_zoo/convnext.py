@@ -28,7 +28,7 @@ from paddle import ParamAttr
 from paddle.nn.initializer import Uniform
 import os
 import math
-from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 trunc_normal_ = nn.initializer.TruncatedNormal(std=0.02)
 zeros_ = nn.initializer.Constant(value=0.0)
@@ -92,7 +92,7 @@ class Block(nn.Layer):
 
     def __init__(self, dim, drop_path=0., layer_scale_init_value=1e-6):
         super().__init__()
-        self.dwconv = nn.Conv2D(dim, dim, kernel_size=7, padding=3,
+        self.dwconv = nn.Conv2D(dim, dim, kernel_size=3, padding=1,
                                 groups=dim)  # depthwise conv
         self.norm = LayerNorm(dim, epsilon=1e-6)
         self.pwconv1 = nn.Linear(
@@ -183,7 +183,7 @@ class ConvNeXt(nn.Layer):
         class_num=1000,
         in_chans=3,
         depths=[3, 3, 9, 3],
-        dims=[96, 192, 384, 768],
+        dims=[128,256,512,1024],
         drop_path_rate=0.,
         layer_scale_init_value=1e-6,
     ):
@@ -281,7 +281,7 @@ class Model(paddle.nn.Layer):
     def __init__(self, class_num=1000,):
         super().__init__()
         self.backbone = ConvNeXt(class_num=class_num)
-        self.head = ClasHead(with_avg_pool=False, in_channels=768, num_classes=class_num)
+        self.head = ClasHead(with_avg_pool=False, in_channels=1024, num_classes=class_num)
 
     def forward(self, x):
 
@@ -293,4 +293,4 @@ class Model(paddle.nn.Layer):
 
 if __name__=="__main__":
     model = ConvNext_tiny()
-    paddle.summary(model,(1,3,224,224))
+    paddle.flops(model,(1,3,224,224))

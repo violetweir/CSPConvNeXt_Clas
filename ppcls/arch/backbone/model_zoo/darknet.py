@@ -21,7 +21,7 @@ from paddle.nn import AdaptiveAvgPool2D, MaxPool2D, AvgPool2D
 from paddle.nn.initializer import Uniform
 import math
 
-from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 MODEL_URLS = {
     "DarkNet53":
@@ -195,3 +195,8 @@ def DarkNet53(pretrained=False, use_ssld=False, **kwargs):
     _load_pretrained(
         pretrained, model, MODEL_URLS["DarkNet53"], use_ssld=use_ssld)
     return model
+
+if __name__== '__main__':
+     model  =DarkNet53()
+     # Total Flops: 1189500624     Total Params: 8688640
+     GFlops = paddle.flops(model,(1,3,224,224),print_detail=True)

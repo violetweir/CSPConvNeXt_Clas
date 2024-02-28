@@ -7,7 +7,7 @@ import paddle
 import paddle.nn.functional as F
 import paddle.nn as nn
 from paddle import ParamAttr
-from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 
 trunc_normal_ = nn.initializer.TruncatedNormal(std=0.02)
@@ -49,32 +49,6 @@ class ClasHead(nn.Layer):
         cls_score = self.fc_cls(x)
         return cls_score
     
-def drop_path(x, drop_prob=0., training=False):
-    """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
-    the original name is misleading as 'Drop Connect' is a different form of dropout in a separate paper...
-    See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ...
-    """
-    if drop_prob == 0. or not training:
-        return x
-    keep_prob = paddle.to_tensor(1 - drop_prob, dtype=x.dtype)
-    shape = (paddle.shape(x)[0], ) + (1, ) * (x.ndim - 1)
-    random_tensor = keep_prob + paddle.rand(shape, dtype=x.dtype)
-    random_tensor = paddle.floor(random_tensor)  # binarize
-    output = x.divide(keep_prob) * random_tensor
-    return output
-
-
-class DropPath(nn.Layer):
-    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks).
-    """
-
-    def __init__(self, drop_prob=None):
-        super(DropPath, self).__init__()
-        self.drop_prob = drop_prob
-
-    def forward(self, x):
-        return drop_path(x, self.drop_prob, self.training)
-    
 class Identity(nn.Layer):
 
     def __init__(self):
@@ -99,8 +73,8 @@ class Block(nn.Layer):
             groups = dim
         else:
             groups = 1
-        self.dwconv = nn.Conv2D(dim, dim, kernel_size=kernel_size, padding=kernel_size//2,
-                                groups=groups)  # depthwise conv
+        self.dwconv = nn.Conv2D(dim, dim, kernel_size=7, padding=3,
+                                groups=dim)  # depthwise conv
         self.norm =nn.BatchNorm2D(dim)
         self.pwconv1 = nn.Conv2D(
             dim, 4 * dim, 1)  # pointwise/1x1 convs, implemented with linear layers
@@ -115,8 +89,6 @@ class Block(nn.Layer):
                 value=1.0)
         ) if layer_scale_init_value > 0 else None
 
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else Identity()
-
 
     def forward(self, x):
         input = x
@@ -125,14 +97,16 @@ class Block(nn.Layer):
         x = self.norm(x)
         x = self.pwconv1(x)
         x = self.act(x)
+        # x = self.ese(x)
+        # x = self.norm2(x)
         x = self.pwconv2(x)
         x = self.norm2(x)
         x = self.ese(x)
-        # if self.gamma is not None:
-        #     x = self.gamma * x
+        if self.gamma is not None:
+            x = self.gamma * x
         # x = x.transpose([0, 3, 1, 2])  # (N, H, W, C) -> (N, C, H, W)
 
-        x = input + self.drop_path(x)
+        x = input +  x
         return x
     
 
@@ -209,7 +183,7 @@ class CSPStage(nn.Layer):
         if stride == 2:
             self.down = nn.Sequential(ConvBNLayer(ch_in, ch_mid , 2, stride=2,  act=act))
         else:
-            self.down = Identity()
+            self.down = nn.Sequential(ConvBNLayer(ch_in, ch_mid , 3, stride=1, padding=1,  act=act))
         self.conv1 = ConvBNLayer(ch_mid, ch_mid // 2, 1, act=act)
         self.conv2 = ConvBNLayer(ch_mid, ch_mid // 2, 1, act=act)
         self.blocks = nn.Sequential(*[
@@ -230,8 +204,8 @@ class CSPStage(nn.Layer):
         y1 = self.conv1(x)
         y2 = self.blocks(self.conv2(x))
         y = paddle.concat([y1, y2], axis=1)
-        if self.attn is not None:
-            y = self.attn(y)
+        # if self.attn is not None:
+        #     y = self.attn(y)
         y = self.conv3(y)
         return y
 
@@ -261,7 +235,7 @@ class CSPConvNext(nn.Layer):
         if stem == "va":
             self.Down_Conv = nn.Sequential(
                 ('conv1', ConvBNLayer(
-                    in_chans,(dims[0]+dims[1])//2 , 4, stride=4,  act=act)),
+                    in_chans,dims[0] , 4, stride=4,  act=act)),
             )
         if stem == "vb":
             self.Down_Conv = nn.Sequential(
@@ -277,11 +251,12 @@ class CSPConvNext(nn.Layer):
             x.item() for x in paddle.linspace(0, drop_path_rate, sum(depths))
         ]
         n = len(depths)
-
+        ch_in =[96,96,192,384]
+        ch_out=[96,192,384,768]
         self.stages = nn.Sequential(*[(str(i), CSPStage(
             block_former[i], 
-            dims[i], 
-            dims[i + 1], 
+            ch_in[i], 
+            ch_out[i], 
             depths[i], 
             stride[i],
             dp_rates[sum(depths[:i]) : sum(depths[:i+1])],
@@ -290,18 +265,10 @@ class CSPConvNext(nn.Layer):
             act=nn.GELU))
                                       for i in range(n)])
         self.norm = nn.BatchNorm(dims[-1])
-
-        self.avgpool_pre_head = nn.Sequential(
-                nn.AdaptiveAvgPool2D(1),
-                nn.Conv2D(dims[-1], dims[-1]*2, 1, bias_attr=False),
-                nn.GELU()
-            )
-        self.head = nn.Linear(dims[-1]*2, class_num) \
-                if class_num > 0 else nn.Identity()  
+        
 
         self.apply(self._init_weights)
-
-        # self.head = ClasHead(with_avg_pool=False, in_channels=dims[-1], num_classes=class_num)
+        self.head = ClasHead(with_avg_pool=False, in_channels=dims[-1], num_classes=class_num)
 
 
     def _init_weights(self, m):
@@ -321,12 +288,10 @@ class CSPConvNext(nn.Layer):
             x = stage(x)
             # if idx in self.return_idx:
             #     outs.append(x)
-        return x
+        return self.norm(x.mean([-2, -1]))
 
     def forward(self, x):
         x = self.forward_body(x)
-        x = self.avgpool_pre_head(x)  # B C 1 1
-        x = paddle.flatten(x, 1)
         x = self.head(x)
         return x
 
@@ -355,15 +320,14 @@ def CSPConvNeXt(pretrained=False, use_ssld=False, **kwargs):
 
 
 
-def CSPConvNeXt_mini(pretrained=False, use_ssld=False, **kwargs):
+def CSPConvNeXt_mini_2(pretrained=False, use_ssld=False, **kwargs):
     model = CSPConvNext(
         class_num=1000,
         in_chans=3,
         depths=[3, 3, 9, 3],
         dims=[96,96,192,384,768],
-        # dims=[64,128,256,512,1024],
-        kernel_size=7,
-        if_group=1,
+        kernel_size=3,
+        if_group=0,
         drop_path_rate=0.2,
         layer_scale_init_value=1e-6,
         stride=[1,2,2,2],
@@ -372,22 +336,6 @@ def CSPConvNeXt_mini(pretrained=False, use_ssld=False, **kwargs):
         width_mult = 1.0,
         stem = "va")
     
-def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
-    model = CSPConvNext(
-        class_num=1000,
-        in_chans=3,
-        depths=[3, 3, 18, 9],
-        dims=[64,128,256,512,1024],
-        kernel_size=7,
-        if_group=1,
-        drop_path_rate=0.2,
-        layer_scale_init_value=1e-6,
-        stride=[2,2,2,2],
-        return_idx=[1,2,3],
-        depth_mult = 1.0,
-        width_mult = 1.0,
-        stem = "vb")
-    
     _load_pretrained(
         pretrained, model, MODEL_URLS["ConvNext_tiny"], use_ssld=use_ssld)
     return model
@@ -395,6 +343,6 @@ def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
 
 
 if __name__=="__main__":
-     model  =CSPConvNeXt_medium()
+     model  =CSPConvNeXt_mini_2()
      # Total Flops: 1189500624     Total Params: 8688640
      GFlops = paddle.flops(model,(1,3,224,224),print_detail=True)
