@@ -24,6 +24,30 @@ MODEL_URLS = {
 __all__ = list(MODEL_URLS.keys())
 
 
+class GRN1(nn.Layer):
+
+    def __init__(self, dim,size):
+        super(GRN1,self).__init__()
+        self.gamma = paddle.create_parameter(shape=[1,1,1,dim],
+            dtype='float32',
+            default_initializer=nn.initializer.Constant(
+                value=0.0))
+        
+        self.beta =  paddle.create_parameter(shape=[1,1,1,dim],
+            dtype='float32',
+            default_initializer=nn.initializer.Constant(
+                value=0.0))
+    
+    def forward(self, x):
+        x = paddle.transpose(x,(0,2,3,1))
+        Gx = paddle.linalg.norm(x, p=2, axis=(1,2),keepdim=True)
+        Nx = Gx/ (paddle.mean(x,axis=-1,keepdim=True)+1e-6)
+        x = self.gamma * (x * Nx) + self.beta + x
+        x = paddle.transpose(x,(0,3,1,2))
+        return x
+        
+    
+
 class ClasHead(nn.Layer):
     """Simple classifier head.
     """
@@ -93,7 +117,7 @@ class Block(nn.Layer):
         layer_scale_init_value (float): Init value for Layer Scale. Default: 1e-6.
     """
 
-    def __init__(self, dim, kernel_size=7, if_gourp=1,drop_path=0., layer_scale_init_value=1e-6):
+    def __init__(self, dim,size, kernel_size=7, if_gourp=1,drop_path=0., layer_scale_init_value=1e-6):
         super().__init__()
         if if_gourp == 1:
             groups = dim
@@ -108,6 +132,7 @@ class Block(nn.Layer):
         self.pwconv2 = nn.Conv2D(4 * dim, dim, 1)
         self.ese = EffectiveSELayer(dim, dim)
         self.norm2 =nn.BatchNorm2D(dim)
+        self.grn = GRN1(4*dim,size)
         self.gamma =  paddle.create_parameter(
             shape=[1],
             dtype='float32',
@@ -121,18 +146,20 @@ class Block(nn.Layer):
     def forward(self, x):
         input = x
         x = self.dwconv(x)
-        # x = x.transpose([0, 2, 3, 1])  # (N, C, H, W) -> (N, H, W, C)
         x = self.norm(x)
+        # x = x.transpose([0, 2, 3, 1])  # (N, C, H, W) -> (N, H, W, C)
         x = self.pwconv1(x)
+       # x = self.ese(x)
         x = self.act(x)
+        # self.grn(x)
         x = self.pwconv2(x)
         x = self.norm2(x)
         x = self.ese(x)
-        # if self.gamma is not None:
-        #     x = self.gamma * x
+        if self.gamma is not None:
+            x = self.gamma * x
         # x = x.transpose([0, 3, 1, 2])  # (N, H, W, C) -> (N, C, H, W)
 
-        x = input + self.drop_path(x)
+        x = input + x
         return x
     
 
@@ -198,6 +225,7 @@ class CSPStage(nn.Layer):
                 n,
                 stride,
                 p_rates,
+                size,
                 kernel_size=7,
                 if_group=1,
                 layer_scale_init_value=1e-6,
@@ -214,7 +242,7 @@ class CSPStage(nn.Layer):
         self.conv2 = ConvBNLayer(ch_mid, ch_mid // 2, 1, act=act)
         self.blocks = nn.Sequential(*[
             block_fn(
-                ch_mid // 2, kernel_size, if_group,drop_path=p_rates[i],layer_scale_init_value=layer_scale_init_value)
+                ch_mid // 2,size,kernel_size, if_group,drop_path=p_rates[i],layer_scale_init_value=layer_scale_init_value)
             for i in range(n)
         ])
         if attn:
@@ -234,6 +262,7 @@ class CSPStage(nn.Layer):
             y = self.attn(y)
         y = self.conv3(y)
         return y
+
 
 class CSPConvNext(nn.Layer):
     def __init__(
@@ -277,7 +306,7 @@ class CSPConvNext(nn.Layer):
             x.item() for x in paddle.linspace(0, drop_path_rate, sum(depths))
         ]
         n = len(depths)
-
+        sizes = [224//4,224//8,224//16,224//32]
         self.stages = nn.Sequential(*[(str(i), CSPStage(
             block_former[i], 
             dims[i], 
@@ -286,22 +315,21 @@ class CSPConvNext(nn.Layer):
             stride[i],
             dp_rates[sum(depths[:i]) : sum(depths[:i+1])],
             kernel_size=kernel_size,
-            if_group=if_group, 
+            if_group=if_group,
+            size = sizes[i], 
             act=nn.GELU))
                                       for i in range(n)])
         self.norm = nn.BatchNorm(dims[-1])
+        self.head = ClasHead(with_avg_pool=False, in_channels=dims[-1], num_classes=class_num)
 
-        self.avgpool_pre_head = nn.Sequential(
-                nn.AdaptiveAvgPool2D(1),
-                nn.Conv2D(dims[-1], dims[-1]*2, 1, bias_attr=False),
-                nn.GELU()
-            )
-        self.head = nn.Linear(dims[-1]*2, class_num) \
-                if class_num > 0 else nn.Identity()  
+        # self.avgpool_pre_head = nn.Sequential(
+        #         nn.AdaptiveAvgPool2D(1),
+        #         nn.Conv2D(dims[-1], 1280, 1),
+        #         nn.GELU()
+        #     )
+        # self.head = nn.Linear(1280, class_num)
 
         self.apply(self._init_weights)
-
-        # self.head = ClasHead(with_avg_pool=False, in_channels=dims[-1], num_classes=class_num)
 
 
     def _init_weights(self, m):
@@ -311,6 +339,7 @@ class CSPConvNext(nn.Layer):
                 zeros_(m.bias)
             except:
                 print(m)
+                
     
     
     def forward_body(self, inputs):
@@ -321,12 +350,16 @@ class CSPConvNext(nn.Layer):
             x = stage(x)
             # if idx in self.return_idx:
             #     outs.append(x)
-        return x
+        return self.norm(x.mean([-2, -1]))
 
+    # def forward_head(self, x):
+    #     x = self.avgpool_pre_head(x)  # B C 1 1
+    #     x = paddle.flatten(x, 1)
+    #     x = self.head(x)
+    #     return x
+    
     def forward(self, x):
         x = self.forward_body(x)
-        x = self.avgpool_pre_head(x)  # B C 1 1
-        x = paddle.flatten(x, 1)
         x = self.head(x)
         return x
 
@@ -347,7 +380,7 @@ def _load_pretrained(pretrained, model, model_url, use_ssld=False):
     
 
 
-def CSPConvNeXt(pretrained=False, use_ssld=False, **kwargs):
+def CSPConvNeXt_tiny(pretrained=False, use_ssld=False, **kwargs):
     model = CSPConvNext(**kwargs)
     _load_pretrained(
         pretrained, model, MODEL_URLS["ConvNext_tiny"], use_ssld=use_ssld)
@@ -360,7 +393,7 @@ def CSPConvNeXt_mini(pretrained=False, use_ssld=False, **kwargs):
         class_num=1000,
         in_chans=3,
         depths=[3, 3, 9, 3],
-        dims=[96,96,192,384,768],
+        dims=[48,96,192,384,768],
         # dims=[64,128,256,512,1024],
         kernel_size=7,
         if_group=1,
@@ -371,16 +404,63 @@ def CSPConvNeXt_mini(pretrained=False, use_ssld=False, **kwargs):
         depth_mult = 1.0,
         width_mult = 1.0,
         stem = "va")
+
+    _load_pretrained(
+        pretrained, model, MODEL_URLS["ConvNext_tiny"], use_ssld=use_ssld)
+    return model
+
+    
+def CSPConvNeXt_small(pretrained=False, use_ssld=False, **kwargs):
+    model = CSPConvNext(
+        class_num=1000,
+        in_chans=3,
+        depths=[3, 3, 27, 3],
+        dims=[64,128,256,512,1024],
+        kernel_size=7,
+        if_group=1,
+        drop_path_rate=0.1,
+        layer_scale_init_value=1e-6,
+        stride=[2,2,2,2],
+        return_idx=[1,2,3],
+        depth_mult = 1.0,
+        width_mult = 1.0,
+        stem = "vb")
+
+    _load_pretrained(
+        pretrained, model, MODEL_URLS["ConvNext_tiny"], use_ssld=use_ssld)
+    return model
+
     
 def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
     model = CSPConvNext(
         class_num=1000,
         in_chans=3,
-        depths=[3, 3, 18, 9],
+        depths=[3, 3, 27, 3],
         dims=[64,128,256,512,1024],
         kernel_size=7,
         if_group=1,
-        drop_path_rate=0.2,
+        drop_path_rate=0.1,
+        layer_scale_init_value=1e-6,
+        stride=[2,2,2,2],
+        return_idx=[1,2,3],
+        depth_mult = 1.0,
+        width_mult = 1.0,
+        stem = "vb")
+    
+    _load_pretrained(
+        pretrained, model, MODEL_URLS["ConvNext_tiny"], use_ssld=use_ssld)
+    return model
+
+
+def CSPConvNeXt_large(pretrained=False, use_ssld=False, **kwargs):
+    model = CSPConvNext(
+        class_num=1000,
+        in_chans=3,
+        depths=[3, 3, 27, 3],
+        dims=[96,192,384,768,1536],
+        kernel_size=7,
+        if_group=1,
+        drop_path_rate=0.1,
         layer_scale_init_value=1e-6,
         stride=[2,2,2,2],
         return_idx=[1,2,3],
@@ -395,6 +475,6 @@ def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
 
 
 if __name__=="__main__":
-     model  =CSPConvNeXt_medium()
+     model  = CSPConvNeXt_tiny()
      # Total Flops: 1189500624     Total Params: 8688640
-     GFlops = paddle.flops(model,(1,3,224,224),print_detail=True)
+     paddle.flops(model,(1,3,224,224),print_detail=True)
