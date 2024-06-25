@@ -7,7 +7,7 @@ import paddle
 import paddle.nn.functional as F
 import paddle.nn as nn
 from paddle import ParamAttr
-from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
+#from ppcls.utils.save_load import load_dygraph_pretrain, load_dygraph_pretrain_from_url
 
 
 trunc_normal_ = nn.initializer.TruncatedNormal(std=0.02)
@@ -155,8 +155,8 @@ class Block(nn.Layer):
         x = self.pwconv2(x)
         x = self.norm2(x)
         x = self.ese(x)
-        if self.gamma is not None:
-            x = self.gamma * x
+        # if self.gamma is not None:
+        #     x = self.gamma * x
         # x = x.transpose([0, 3, 1, 2])  # (N, H, W, C) -> (N, C, H, W)
 
         x = input + x
@@ -297,9 +297,13 @@ class CSPConvNext(nn.Layer):
                 ('conv1', ConvBNLayer(
                     in_chans, dims[0]//2 , 2, stride=2,  act=act)),
                 ('conv2', ConvBNLayer(
-                    dims[0]//2, dims[0]//2 , 3, stride=1,padding=1,  act=act)),
+                    dims[0]//2, dims[0]//2 , 3, stride=1,padding=1,groups=dims[0]//2,  act=act)),
                 ('conv3', ConvBNLayer(
-                    dims[0]//2, dims[0] , 3, stride=1,padding=1, act=act)),
+                    dims[0]//2, dims[0]//2 , 1, stride=1,  act=act)),
+                ('conv4', ConvBNLayer(
+                    dims[0]//2, dims[0] , 3, stride=1,padding=1,groups=dims[0]//2, act=act)),
+                ('conv5', ConvBNLayer(
+                    dims[0], dims[0] , 1, stride=1,  act=act))
             )
         
         dp_rates = [
@@ -431,12 +435,12 @@ def CSPConvNeXt_small(pretrained=False, use_ssld=False, **kwargs):
     return model
 
     
-def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
+def CSPConvNeXt_base(pretrained=False, use_ssld=False, **kwargs):
     model = CSPConvNext(
         class_num=1000,
         in_chans=3,
         depths=[3, 3, 27, 3],
-        dims=[64,128,256,512,1024],
+        dims=[96,192,384,768,1536],
         kernel_size=7,
         if_group=1,
         drop_path_rate=0.1,
@@ -452,12 +456,28 @@ def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
     return model
 
 
+def CSPConvNeXt_medium(pretrained=False, use_ssld=False, **kwargs):
+    model = CSPConvNext(
+        class_num=1000,
+        in_chans=3,
+        depths=[3, 3, 27, 3],
+        dims=[128,256,512,1024,2048],
+        kernel_size=7,
+        if_group=1,
+        drop_path_rate=0.1,
+        layer_scale_init_value=1e-6,
+        stride=[2,2,2,2],
+        return_idx=[1,2,3],
+        depth_mult = 1.0,
+        width_mult = 1.0,
+        stem = "vb")
+    
 def CSPConvNeXt_large(pretrained=False, use_ssld=False, **kwargs):
     model = CSPConvNext(
         class_num=1000,
         in_chans=3,
         depths=[3, 3, 27, 3],
-        dims=[96,192,384,768,1536],
+        dims=[256,512,1024,2048,4096],
         kernel_size=7,
         if_group=1,
         drop_path_rate=0.1,
